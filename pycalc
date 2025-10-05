@@ -1,0 +1,91 @@
+#!/bin/sh
+# PyCalc-NG: Infinite-precision desktop calculator in ~50 lines of Python
+":" '''\'
+# This shell "dispatcher" runs PyCalc-NG in a supported,
+# available terminal emulator that serves as its GUI 
+set -eu
+exists () { command -v "$1" >/dev/null 2>&1; } 
+
+# FIXME: How to add window icon "accessories-calculator" to xterm and gnome-terminal?
+gui=
+! exists gnome-terminal || gui='gnome-terminal --hide-menubar --wait --zoom 1.5 --name=PyCalc-NG --title=PyCalc-NG --geometry=50x10 -- sh -c '
+! exists konsole || gui='konsole --hide-menubar --hide-tabbar --notransparency --nofork --title "PyCalc-NG" --name "PyCalc-NG" --icon accessories-calculator --geometry 50x10 -e sh -c '
+! exists xterm || gui='xterm -fn 10x20 -name PyCalc-NG -title PyCalc-NG -n accessories-calculator -geometry 50x10 -xrm XTerm.VT100.translations:#override<Key>Escape:quit() -e sh -c '
+
+# If xdotool and xprop are available, support floating-like dialog mode in tiling WMs like i3
+nomap=
+if [ "$DISPLAY" ] && exists xdotool && exists xprop; then
+    case "$gui" in xterm*) gui="xterm -nomap ${gui#xterm }" ;; esac
+    nomap=1
+fi
+
+cfg_dir="${XDG_CONFIG_DIR:-$HOME/.config}/pycalc/"
+state_dir="${XDG_STATE_DIR:-$HOME/.local/state}/pycalc/"
+mkdir -p "$cfg_dir" "$state_dir"]
+
+if exists ptpython; then 
+    echo 'def configure(repl): setattr(repl, "confirm_exit", False)' >"$cfg_dir/ptpython"
+    $gui "ptpython --config-file '$cfg_dir/ptpython' --history-file '$state_dir/ptpython' -i -- \"$0\" $*"
+elif exists ipython3; then
+    $gui "ipython3 --pprint --no-banner --no-confirm-exit --no-term-title --ipython-dir '$cfg_dir/ipython' -i -- \"$0\" $*"
+else
+    $gui "python -Pisu -- \"$0\" $*"
+fi &
+
+if [ "$nomap" ]; then
+    window_id="$(xdotool search --sync --pid $! --limit 1)"
+    xprop -id "$window_id" -f _NET_WM_WINDOW_TYPE 32a -set _NET_WM_WINDOW_TYPE _NET_WM_WINDOW_TYPE_DIALOG
+    xdotool windowunmap --sync "$window_id" windowmap "$window_id" windowactivate "$window_id" 2>/dev/null
+fi
+
+wait
+exit 0
+: \''''
+
+from math import *
+from itertools import *
+from statistics import *
+
+try:
+    from numpy import *
+except ImportError:
+    from warnings import warn
+    warn("Package numpy can be imported if made available",
+         category=ImportWarning, stacklevel=2)
+
+def _displayhook_pprint(obj):
+    if obj is None:
+        return
+
+    g = globals()
+    if 'ans' in g:
+        g['__'] = g['ans2'] = g['ans']
+    g['_'] = g['ans'] = obj
+
+    from collections.abc import Mapping
+    if isinstance(obj, Mapping):  # Help pprint e.g. os.environ
+        obj = dict(obj)
+    try:
+        from termios import tcgetwinsize
+        columns = tcgetwinsize(0)[1]
+    except Exception:
+        columns = 80
+    from pprint import pprint
+    pprint(obj, width=columns, depth=5)
+
+
+def _patch_builtins():
+    import _sitebuiltins
+    __builtins__.copyright = _sitebuiltins._Printer("copyright", '''
+Copyright (c) 2025 pycalc-ng & co.
+All rights reserved. https://kernc.github.io/pycalc-ng
+
+''' + __builtins__.copyright._Printer__data)
+    for key in ['credits', 'license']:
+        __builtins__.__dict__.pop(key, None)
+
+
+__import__('sys').set_int_max_str_digits(100000)
+__import__('sys').displayhook = _displayhook_pprint
+_patch_builtins()
+del _displayhook_pprint, _patch_builtins
